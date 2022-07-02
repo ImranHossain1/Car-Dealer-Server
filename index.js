@@ -54,12 +54,56 @@ async function run(){
 
     //Vhicles
     app.get('/vehicles', async(req,res)=>{
-      const query= {};
+      //const query= {};
+      const page = parseInt(req.query.page);
+      const size = parseInt(req.query.size);
+      const cons = req.query.condition;
+      let query
+      if(cons){
+         query = {condition : cons}
+      }
+      else{
+         query = {}
+      }
+     
       const cursor= vehicleCollection.find(query);
-      const vehicles =await cursor.toArray();
+      // const vehicles =await cursor.toArray();
+      let vehicles;
+            if(page || size){
+                // 0 --> skip: 0 get: 0-10(10): 
+                // 1 --> skip: 1*10 get: 11-20(10):
+                // 2 --> skip: 2*10 get: 21-30 (10):
+                // 3 --> skip: 3*10 get: 21-30 (10):
+                vehicles = await cursor.skip(page*size).limit(size).toArray();
+            }
+            else{
+                vehicles = await cursor.toArray();
+            }
       res.send(vehicles);
     })
+    app.get('/vehicles/:condition',async (req,res)=>{
+      const cons = req.params.condition;
+      const query = {condition : cons}
+      const cursor= vehicleCollection.find(query);
+      const result =await cursor.toArray();
+      res.send(result)
+    })
     
+    app.get('/vehicleCount', async(req, res) =>{
+      const count = await vehicleCollection.estimatedDocumentCount();
+      //console.log(count)
+      res.send({count});
+    });
+    app.get('/vehicleCount/:condition', async(req, res) =>{
+      const cons = req.params.condition;
+      const query = {condition : cons}
+      //console.log(query)
+      const cursor= vehicleCollection.find(query);
+      const count = await cursor.count();
+      //console.log(count)
+      res.send({count}); 
+    });
+
     app.post('/vehicle', async(req,res)=>{
       const vehicle = req.body;
       const result = await vehicleCollection.insertOne(vehicle);
