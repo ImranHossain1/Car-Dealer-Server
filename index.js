@@ -31,7 +31,7 @@ async function run(){
     await client.connect();
     const userCollection = client.db('CarDealer').collection('users');
     const vehicleCollection = client.db('CarDealer').collection('vehicles');
-
+    const confirmVehicleCollection = client.db('CarDealer').collection('bookedVehicles');
     app.get('/users', async(req,res)=>{
       const users = await userCollection.find().toArray();
       res.send(users);
@@ -54,26 +54,39 @@ async function run(){
 
     //Vhicles
     app.get('/vehicles', async(req,res)=>{
-      //const query= {};
       const page = parseInt(req.query.page);
       const size = parseInt(req.query.size);
       const cons = req.query.condition;
+      const com = req.query.company;
+      const cat = req.query.category;
       let query
-      if(cons){
-         query = {condition : cons}
+      if(cons && com && cat){
+         query = {condition: cons, company:com, catagory:cat }
+      }
+      else if(cons && com){
+        query = {condition: cons, company:com}
+      }
+      else if(cons && cat){
+        query = {condition: cons, catagory:cat}
+      }
+      else if(com && cat){
+        query = {company:com, catagory:cat}
+      }
+      else if(com){
+        query = {company:com}
+      }
+      else if(cons){
+        query = {condition: cons}
+      }
+      else if(cat){
+        query = {catagory:cat}
       }
       else{
          query = {}
-      }
-     
-      const cursor= vehicleCollection.find(query);
-      // const vehicles =await cursor.toArray();
+      } 
+      const cursor=await vehicleCollection.find(query);
       let vehicles;
             if(page || size){
-                // 0 --> skip: 0 get: 0-10(10): 
-                // 1 --> skip: 1*10 get: 11-20(10):
-                // 2 --> skip: 2*10 get: 21-30 (10):
-                // 3 --> skip: 3*10 get: 21-30 (10):
                 vehicles = await cursor.skip(page*size).limit(size).toArray();
             }
             else{
@@ -81,16 +94,47 @@ async function run(){
             }
       res.send(vehicles);
     })
-    app.get('/vehicles/:condition',async (req,res)=>{
-      const cons = req.params.condition;
-      const query = {condition : cons}
-      const cursor= vehicleCollection.find(query);
-      const result =await cursor.toArray();
-      res.send(result)
+
+    app.get('/vehicle/:id', async(req,res)=>{
+      const id = req.params.id;
+      const query= {_id: ObjectId(id)};
+      const vehicle = await vehicleCollection.findOne(query);
+      res.send(vehicle);
     })
     
     app.get('/vehicleCount', async(req, res) =>{
-      const count = await vehicleCollection.estimatedDocumentCount();
+      const cons = req.query.condition;
+      const com = req.query.company;
+      const cat = req.query.category;
+      let query
+      if(cons && com && cat){
+         query = {condition: cons, company:com, catagory:cat }
+      }
+      else if(cons && com){
+        query = {condition: cons, company:com}
+      }
+      else if(cons && cat){
+        query = {condition: cons, catagory:cat}
+      }
+      else if(com && cat){
+        query = {company:com, catagory:cat}
+      }
+      else if(com){
+        query = {company:com}
+      }
+      else if(cons){
+        query = {condition: cons}
+      }
+      else if(cat){
+        query = {catagory:cat}
+      }
+      else{
+         query = {}
+      } 
+      //console.log(query)
+      const cursor= vehicleCollection.find(query);
+      const count = await cursor.count();
+      //const count = await vehicleCollection.estimatedDocumentCount();
       //console.log(count)
       res.send({count});
     });
@@ -99,15 +143,31 @@ async function run(){
       const query = {condition : cons}
       //console.log(query)
       const cursor= vehicleCollection.find(query);
-      const count = await cursor.count();
+      const count = await cursor.estimatedDocumentCount();
       //console.log(count)
       res.send({count}); 
     });
 
-    app.post('/vehicle', async(req,res)=>{
+    app.post('/vehicle',verifyJWT, async(req,res)=>{
       const vehicle = req.body;
       const result = await vehicleCollection.insertOne(vehicle);
       res.send(result)
+    })
+
+    //confirm a new vehicle
+    app.post('/bookedVehicle', async(req,res)=>{
+      const confirmBooking = req.body;
+      
+      const query = {carId: confirmBooking.carId, userName: confirmBooking.userName};
+      //console.log(query)
+      const exists = await confirmVehicleCollection.findOne(query);
+       if(exists){
+          console.log(exists)
+           return res.send({success: false, confirmBooking: exists})
+       }
+      const result =await confirmVehicleCollection.insertOne(confirmBooking);
+      //sendConfirmBookingEmail(confirmBooking)
+      return res.send({success: true,result});
     })
   }
   finally{
