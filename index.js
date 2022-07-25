@@ -3,7 +3,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cors = require('cors')
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
-
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app= express()
 const port = process.env.PORT || 5000
 app.use(cors());
@@ -32,7 +32,19 @@ async function run(){
     const userCollection = client.db('CarDealer').collection('users');
     const vehicleCollection = client.db('CarDealer').collection('vehicles');
     const confirmVehicleCollection = client.db('CarDealer').collection('bookedVehicles');
-    app.get('/users', async(req,res)=>{
+    const paymentCollection = client.db('TravelGuide').collection('payments');
+    const verifyAdmin = async(req, res, next)=>{
+      const requester = req.decoded.email;
+      const requesterAccount = await userCollection.findOne({email: requester})
+      if(requesterAccount.role==='admin'){
+        next();
+      }
+      else{
+        return res.status(403).send({message: 'Forbidden Access'});
+      }
+    }
+
+    app.get('/users', verifyJWT,verifyAdmin, async(req,res)=>{
       const users = await userCollection.find().toArray();
       res.send(users);
     })
@@ -50,7 +62,33 @@ async function run(){
       res.send({result, token});
     }) 
 
+        //Get perticular User
+        app.get('/user/:email',verifyJWT, async(req, res)=>{
+          const email= req.params.email;
+          const filter = {email: email};
+          const result = await userCollection.findOne(filter);
+          res.send(result)
+        })
 
+    //verify user role
+    app.get('/admin/:email',verifyJWT,verifyAdmin, async(req,res)=>{
+      const email = req.params.email;
+      const user = await userCollection.findOne({email:email})
+      const isAdmin = user.role ==='admin';
+      res.send({admin: isAdmin});
+    })
+    //add user role as ADMIN
+    app.put('/user/admin/:email',verifyJWT,verifyAdmin, async(req,res)=>{
+      const email= req.params.email;
+      
+      const filter= {email: email}
+      //console.log(filter);
+       const updatedDoc = {
+        $set: {role: 'admin'}
+      };
+      const result = await userCollection.updateOne(filter, updatedDoc);
+      res.send({result}); 
+    })
 
     //Vhicles
     app.get('/vehicles', async(req,res)=>{
@@ -148,27 +186,132 @@ async function run(){
       res.send({count}); 
     });
 
-    app.post('/vehicle',verifyJWT, async(req,res)=>{
+    app.post('/vehicle',verifyJWT, verifyAdmin, async(req,res)=>{
       const vehicle = req.body;
       const result = await vehicleCollection.insertOne(vehicle);
       res.send(result)
     })
 
+    //vehicle Update
+    app.put('/vehicle/:id',verifyJWT,verifyAdmin, async(req,res)=>{
+      const id= req.params.id;
+      const vehicle = req.body;
+      //console.log(vehicle);
+      const filter = {_id: ObjectId(id)};
+      const updateDoc = {
+        $set: vehicle,
+      };
+      const result = await vehicleCollection.updateOne(filter, updateDoc);
+      res.send({result}); 
+    })
+    app.patch('/vehicle/:id',verifyJWT, async(req,res)=>{
+      const id= req.params.id;
+      const subQuantity = req.body;
+      console.log(subQuantity);
+      const filter = {_id: ObjectId(id)};
+      if(subQuantity.quantity<=0){
+        return res.send({success: false})
+      }
+      const updateDoc = {
+        $set: {
+          quantity: subQuantity.quantity
+        }
+      };
+      const result = await vehicleCollection.updateOne(filter, updateDoc);
+      res.send({success: true,result}); 
+    })
+
+    //Delete a vehicle
+    app.delete('/vehicle/:id',verifyJWT, verifyAdmin, async(req,res)=>{
+      const id = req.params.id;
+      const filter = {_id:ObjectId(id)}
+      const result = await vehicleCollection.deleteOne(filter);
+      res.send(result);
+    })
     //confirm a new vehicle
-    app.post('/bookedVehicle', async(req,res)=>{
+    app.post('/bookedVehicle',verifyJWT, async(req,res)=>{
       const confirmBooking = req.body;
       
       const query = {carId: confirmBooking.carId, userName: confirmBooking.userName};
-      //console.log(query)
       const exists = await confirmVehicleCollection.findOne(query);
        if(exists){
           console.log(exists)
            return res.send({success: false, confirmBooking: exists})
        }
       const result =await confirmVehicleCollection.insertOne(confirmBooking);
-      //sendConfirmBookingEmail(confirmBooking)
       return res.send({success: true,result});
     })
+    app.delete('/bookedVehicle/:id',verifyJWT, async(req,res)=>{
+      const id = req.params.id;
+      const filter = {_id:ObjectId(id)}
+      const result = await confirmVehicleCollection.deleteOne(filter);
+      res.send(result);
+    })
+
+    app.put('/bookedVehicle/:id',verifyJWT, async(req,res)=>{
+      const id= req.params.id;
+      const vehicle = req.body;
+      //console.log(vehicle);
+      const filter = {_id: ObjectId(id)};
+      const updateDoc = {
+        $set: vehicle,
+      };
+      const result = await confirmVehicleCollection.updateOne(filter, updateDoc);
+      res.send({result}); 
+    })
+
+        //get user Booked Vehicle from DB
+
+      app.get('/booking',verifyJWT, async(req,res)=>{
+          const email = req.query.user;
+          const decodedEmail = req.decoded.email;
+          if(email === decodedEmail){
+            const query = {userEmail: email};
+            const bookings = await confirmVehicleCollection.find(query).toArray();
+            return res.send(bookings);
+          }
+          else{
+            return res.status(403).send({message: 'Forbidden Access'});
+          }    
+      }) 
+      app.get('/booking/:id',verifyJWT, async(req,res)=>{
+        const id= req.params.id;
+        const query = {_id: ObjectId(id)}
+        const confirmedVehicle = await confirmVehicleCollection.findOne(query);
+        res.send(confirmedVehicle)
+      })
+
+      //Payment
+     app.patch('/booking/:id',verifyJWT, async(req,res)=>{
+      const id = req.params.id;
+      const payment = req.body;
+      const filter ={_id : ObjectId(id)};;
+      const updatedDoc = {
+        $set : {
+          paid: true,
+          transactionId: payment.transactionId
+        }
+      }
+      const result = await paymentCollection.insertOne(payment);
+      const updatedBooking = await confirmVehicleCollection.updateOne(filter, updatedDoc);
+      const booking = await confirmVehicleCollection.findOne(filter);
+      //sendPaymentConfirmationEmail(booking);
+      res.send(updatedDoc)
+    })
+     app.post('/create-payment-intent',verifyJWT, async(req,res)=>{
+      const booking = req.body;
+      const cost = booking.cost;
+      console.log(cost);
+      const amount = cost*100;
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "eur",
+        payment_method_types: ['card']
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret
+      })
+    }) 
   }
   finally{
 
