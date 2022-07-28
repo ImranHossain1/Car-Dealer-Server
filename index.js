@@ -32,7 +32,9 @@ async function run(){
     const userCollection = client.db('CarDealer').collection('users');
     const vehicleCollection = client.db('CarDealer').collection('vehicles');
     const confirmVehicleCollection = client.db('CarDealer').collection('bookedVehicles');
-    const paymentCollection = client.db('TravelGuide').collection('payments');
+    const paymentCollection = client.db('CarDealer').collection('payments');
+    const ReviewCollection = client.db('CarDealer').collection('reviews');
+    const messagesCollection = client.db('CarDealer').collection('notifications');
     const verifyAdmin = async(req, res, next)=>{
       const requester = req.decoded.email;
       const requesterAccount = await userCollection.findOne({email: requester})
@@ -209,7 +211,7 @@ async function run(){
       const subQuantity = req.body;
       console.log(subQuantity);
       const filter = {_id: ObjectId(id)};
-      if(subQuantity.quantity<=0){
+      if(subQuantity.quantity<0){
         return res.send({success: false})
       }
       const updateDoc = {
@@ -298,7 +300,7 @@ async function run(){
       //sendPaymentConfirmationEmail(booking);
       res.send(updatedDoc)
     })
-     app.post('/create-payment-intent',verifyJWT, async(req,res)=>{
+    app.post('/create-payment-intent',verifyJWT, async(req,res)=>{
       const booking = req.body;
       const cost = booking.cost;
       console.log(cost);
@@ -312,6 +314,69 @@ async function run(){
         clientSecret: paymentIntent.client_secret
       })
     }) 
+
+    // add a new Review
+    app.post('/review',verifyJWT, async(req,res)=>{
+      const review = req.body;
+      const query = {carId: review.carId, reviewerEmail: review.reviewerEmail};
+      const exists = await ReviewCollection.findOne(query);
+       if(exists){
+           return res.send({success: false, confirmBooking: exists})
+       }
+      const result =await ReviewCollection.insertOne(review);
+      return res.send({success: true,result});
+    })
+    app.get('/review', async(req,res)=>{
+      const carId = req.query.carId;
+      const reviewerEmail = req.query.userEmail;
+      const query = {carId: carId, reviewerEmail: reviewerEmail};
+      const filter=  await ReviewCollection.findOne(query);
+      
+      //const count = await vehicleCollection.estimatedDocumentCount();
+      //console.log(count)
+      res.send(filter);
+    })
+    app.get('/review/:id', async(req,res)=>{
+      const carId = req.params.id;
+      const query = {carId: carId};
+      const filter=  await ReviewCollection.find(query).toArray();
+
+      res.send(filter);
+    })
+    app.post('/notification', async(req, res)=>{
+      mail = req.body;
+      const result = await messagesCollection.insertOne(mail);
+      res.send(result);
+    })
+    app.get('/notifications',verifyJWT,verifyAdmin, async(req, res)=>{
+      const result = await messagesCollection.find().toArray();
+      res.send(result)
+    })
+    app.get('/notification/:id', async(req, res)=>{
+      const id = req.params.id;
+      //console.log(id);
+      const query ={ _id: ObjectId(id)};
+      const result =await messagesCollection.findOne(query);
+      res.send(result)
+    })
+    app.patch('/notification/:id',verifyJWT, verifyAdmin, async(req, res)=>{
+      const id= req.params.id;
+      const status= req.body
+      const filter ={_id : ObjectId(id)};;
+      const updatedDoc = {
+        $set : {
+          unread: status.unread,
+        }
+      }
+      const result = await messagesCollection.updateOne(filter, updatedDoc);
+      res.send(result)
+    })
+    app.delete('/notification/:id',verifyJWT, verifyAdmin, async(req,res)=>{
+      const id = req.params.id;
+      const filter = {_id:ObjectId(id)}
+      const result = await messagesCollection.deleteOne(filter);
+      res.send(result);
+    })
   }
   finally{
 
