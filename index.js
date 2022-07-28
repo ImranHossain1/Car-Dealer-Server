@@ -352,7 +352,7 @@ async function run(){
       const result = await messagesCollection.find().toArray();
       res.send(result)
     })
-    app.get('/notification/:id', async(req, res)=>{
+    app.get('/notification/:id',verifyJWT,verifyAdmin, async(req, res)=>{
       const id = req.params.id;
       //console.log(id);
       const query ={ _id: ObjectId(id)};
